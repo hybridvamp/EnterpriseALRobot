@@ -5,7 +5,7 @@ import re
 import time
 from functools import partial
 from io import BytesIO
-from tg_bot.modules.helper_funcs.decorators import rate_limit
+from tg_bot.modules.helper_funcs.decorators import rate_limit, kigchatmember
 import tg_bot.modules.sql.welcome_sql as sql
 from tg_bot import (
     DEV_USERS,
@@ -168,6 +168,7 @@ def send(update, message, keyboard, backup_message):
     return msg
 
 
+@kigchatmember(group=-100, run_async=True)
 @rate_limit(40, 60)
 def welcomeFilter(update: Update, context: CallbackContext):
     if update.effective_chat.type not in ["group", "supergroup"]:
@@ -1313,11 +1314,6 @@ def get_help(chat):
 # LEFT_MEM_HANDLER = MessageHandler(
 #     Filters.status_update.left_chat_member, left_member, run_async=True
 # )
-
-dispatcher.add_handler(
-    ChatMemberHandler(welcomeFilter, ChatMemberHandler.CHAT_MEMBER, run_async=True),
-    group=-100,
-)
 
 # dispatcher.add_handler(
 #     MessageHandler(Filters.chat_type.groups, cleanServiceFilter), group=100

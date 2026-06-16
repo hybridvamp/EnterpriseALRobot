@@ -2,7 +2,7 @@ import contextlib
 from io import BytesIO
 import re
 from tg_bot.modules.helper_funcs.chat_status import dev_plus, sudo_plus
-from tg_bot.modules.helper_funcs.decorators import rate_limit
+from tg_bot.modules.helper_funcs.decorators import rate_limit, kigchatmember
 import time
 import tg_bot.modules.sql.users_sql as sql
 from tg_bot import DEV_USERS, log, OWNER_ID, dispatcher, redis_conn
@@ -391,6 +391,7 @@ def broadcast_callback(update: Update, context: CallbackContext):
         query.answer()
 
 
+@kigchatmember(group=110, run_async=True)
 def welcomeFilter(update: Update, context: CallbackContext):
     if update.effective_chat.type not in ["group", "supergroup"]:
         return
@@ -529,11 +530,6 @@ CHAT_CHECKER_HANDLER = MessageHandler(
     Filters.all & Filters.chat_type.groups & ~Filters.user(777000), chat_checker, run_async=True
 )
 # CHATLIST_HANDLER = CommandHandler("chatlist", chats, run_async=True)
-
-dispatcher.add_handler(
-    ChatMemberHandler(
-        welcomeFilter, ChatMemberHandler.CHAT_MEMBER, run_async=True
-    ), group=110)
 
 dispatcher.add_handler(USER_HANDLER, USERS_GROUP)
 dispatcher.add_handler(BROADCAST_HANDLER)

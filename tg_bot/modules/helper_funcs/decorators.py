@@ -8,12 +8,14 @@ from telegram.ext import (
     MessageHandler,
     CallbackQueryHandler,
     InlineQueryHandler,
+    ChatMemberHandler,
     CallbackContext,
     Filters,
 )
 from tg_bot import REDIS_HOST, REDIS_PORT, REDIS_DB, REDIS_PASSWORD, dispatcher
 from typing import Optional, List, Callable, Union
 from tg_bot.modules.disable import DisableAbleCommandHandler, DisableAbleMessageHandler
+from tg_bot.modules.sql import SESSION
 
 redis_client = redis.Redis(
     host=REDIS_HOST,
@@ -21,6 +23,28 @@ redis_client = redis.Redis(
     db=REDIS_DB,
     password=REDIS_PASSWORD,
 )
+
+
+def _release_session(func: Callable) -> Callable:
+    """Release the thread-local SQLAlchemy session at the end of every update.
+
+    The session factory runs with autocommit off, so even a plain SELECT opens a
+    transaction. scoped_session is thread-local and the worker threads are reused
+    across updates, so a handler that reads without committing leaves the
+    connection 'idle in transaction', and a handler that errors leaves the session
+    in a failed state that poisons the next update on that thread
+    (PendingRollbackError). SESSION.remove() closes/rolls back and discards the
+    thread-local session so the next update starts clean.
+    """
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        finally:
+            SESSION.remove()
+
+    return wrapper
 
 
 def rate_limit(messages_per_window: int, window_seconds: int):
@@ -90,10 +114,11 @@ class KigyoTelegramHandler:
 
             command_filter = command_filter & ~Filters.update.edited_message
 
+            callback = _release_session(func)
             if can_disable:
                 handler = DisableAbleCommandHandler(
                     commands,
-                    func,
+                    callback,
                     filters=command_filter,
                     run_async=run_async,
                     pass_args=pass_args,
@@ -103,7 +128,7 @@ class KigyoTelegramHandler:
             else:
                 handler = CommandHandler(
                     commands,
-                    func,
+                    callback,
                     filters=command_filter,
                     run_async=run_async,
                     pass_args=pass_args,
@@ -130,12 +155,13 @@ class KigyoTelegramHandler:
             message_filter = pattern if pattern else Filters.all
             message_filter = message_filter & ~Filters.update.edited_message
 
+            callback = _release_session(func)
             if can_disable:
                 handler = DisableAbleMessageHandler(
-                    message_filter, func, friendly=friendly, run_async=run_async
+                    message_filter, callback, friendly=friendly, run_async=run_async
                 )
             else:
-                handler = MessageHandler(message_filter, func, run_async=run_async)
+                handler = MessageHandler(message_filter, callback, run_async=run_async)
 
             self._add_handler(handler, group)
             logging.debug(f"[KIGMSG] Loaded filter for function {func.__name__}")
@@ -145,7 +171,9 @@ class KigyoTelegramHandler:
 
     def callbackquery(self, pattern: str = None, run_async: bool = True):
         def decorator(func: Callable):
-            handler = CallbackQueryHandler(func, pattern=pattern, run_async=run_async)
+            handler = CallbackQueryHandler(
+                _release_session(func), pattern=pattern, run_async=run_async
+            )
             self._add_handler(handler)
             logging.debug(
                 f"[KIGCALLBACK] Loaded callbackquery handler for function {func.__name__}"
@@ -164,7 +192,7 @@ class KigyoTelegramHandler:
     ):
         def decorator(func: Callable):
             handler = InlineQueryHandler(
-                func,
+                _release_session(func),
                 pattern=pattern,
                 run_async=run_async,
                 pass_user_data=pass_user_data,
@@ -179,6 +207,24 @@ class KigyoTelegramHandler:
 
         return decorator
 
+    def chatmember(
+        self,
+        chat_member_types: int = ChatMemberHandler.CHAT_MEMBER,
+        run_async: bool = True,
+        group: Optional[int] = None,
+    ):
+        def decorator(func: Callable):
+            handler = ChatMemberHandler(
+                _release_session(func), chat_member_types, run_async=run_async
+            )
+            self._add_handler(handler, group)
+            logging.debug(
+                f"[KIGCHATMEMBER] Loaded chatmember handler for function {func.__name__}"
+            )
+            return func
+
+        return decorator
+
 
 kigyo_handler = KigyoTelegramHandler(dispatcher)
 
@@ -186,3 +232,4 @@ kigcmd = kigyo_handler.command
 kigmsg = kigyo_handler.message
 kigcallback = kigyo_handler.callbackquery
 kiginline = kigyo_handler.inlinequery
+kigchatmember = kigyo_handler.chatmember

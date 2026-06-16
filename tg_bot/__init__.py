@@ -7,6 +7,7 @@ import telegram.ext as tg
 from configparser import ConfigParser
 from logging.handlers import RotatingFileHandler
 from dataclasses import dataclass
+from functools import wraps
 
 
 StartTime = time.time()
@@ -166,6 +167,58 @@ updater = tg.Updater(
     request_kwargs={"read_timeout": 10, "connect_timeout": 10},
 )
 dispatcher = updater.dispatcher
+
+
+def _install_session_cleanup(dp):
+    """Release the thread-local SQLAlchemy session at the end of every unit of work.
+
+    The session factory runs with autocommit off, so even a SELECT opens a
+    transaction on a thread-local scoped_session, and the dispatcher reuses its
+    worker threads across updates. Without an explicit release a read leaves the
+    connection "idle in transaction", and a failed statement poisons the next
+    update that lands on the same thread (PendingRollbackError). Hooking the two
+    places handler code actually runs guarantees the session is released in the
+    thread that used it, regardless of how the handler was registered (kig*
+    decorator or a bare dispatcher.add_handler):
+
+      * process_update runs in the dispatcher thread -> covers sync handlers and
+        the DB lookups some handlers do in Handler.check_update.
+      * run_async runs run_async=True callbacks in the worker pool.
+
+    SESSION.remove() is idempotent, so this composes safely with the per-handler
+    cleanup the kig* decorators already apply. Error-handler callbacks are left
+    unwrapped so the dispatcher's error-recursion guard (keyed on function
+    identity) keeps working.
+    """
+    from tg_bot.modules.sql import SESSION
+
+    orig_process_update = dp.process_update
+    orig_run_async = dp.run_async
+
+    def process_update(update):
+        try:
+            return orig_process_update(update)
+        finally:
+            SESSION.remove()
+
+    def run_async(func, *args, **kwargs):
+        if func in dp.error_handlers:
+            return orig_run_async(func, *args, **kwargs)
+
+        @wraps(func)
+        def runner(*a, **k):
+            try:
+                return func(*a, **k)
+            finally:
+                SESSION.remove()
+
+        return orig_run_async(runner, *args, **kwargs)
+
+    dp.process_update = process_update
+    dp.run_async = run_async
+
+
+_install_session_cleanup(dispatcher)
 
 
 # Load at end to ensure all prev variables have been set

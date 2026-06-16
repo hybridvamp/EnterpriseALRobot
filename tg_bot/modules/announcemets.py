@@ -7,6 +7,7 @@ from telegram.chatmemberupdated import ChatMemberUpdated
 from telegram.ext.chatmemberhandler import ChatMemberHandler
 import tg_bot.modules.sql.log_channel_sql as logsql
 from tg_bot import dispatcher
+from tg_bot.modules.helper_funcs.decorators import kigchatmember
 from tg_bot.modules.log_channel import loggable
 
 import tg_bot.modules.sql.logger_sql as sql
@@ -33,6 +34,7 @@ def do_announce(chat):  # announce to chat or only to log channel?
     return bool(chat.type != "channel" and sql.does_chat_log(chat.id))
 
 
+@kigchatmember(run_async=True)
 @loggable
 def chatmemberupdates(update: Update, context: CallbackContext) -> Optional[str]:
     bot = context.bot
@@ -358,6 +360,3 @@ def chatmemberupdates(update: Update, context: CallbackContext) -> Optional[str]
                     f"<b>ID</b>: <code>{update.chat_member.new_chat_member.user.id}</code>"
                 )
                 return log_message
-
-
-dispatcher.add_handler(ChatMemberHandler(chatmemberupdates, ChatMemberHandler.CHAT_MEMBER, run_async=True))

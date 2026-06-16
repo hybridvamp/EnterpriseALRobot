@@ -49,10 +49,13 @@ def disable_antichannel(chat_id: int):
 
 def antichannel_status(chat_id: int) -> bool:
     with ANTICHANNEL_SETTING_LOCK:
-        d = SESSION.query(AntiChannelSettings).get(str(chat_id))
-        if not d:
-            return False
-        return d.setting
+        try:
+            d = SESSION.query(AntiChannelSettings).get(str(chat_id))
+            if not d:
+                return False
+            return d.setting
+        finally:
+            SESSION.close()
 
 
 def migrate_chat(old_chat_id, new_chat_id):

@@ -39,7 +39,13 @@ def create_db_engine():
         pool_size=KInit.POSTGRES_POOL_SIZE,
         max_overflow=KInit.POSTGRES_MAX_OVERFLOW,
         pool_timeout=KInit.POSTGRES_POOL_TIMEOUT,
-        pool_recycle=KInit.POSTGRES_POOL_RECYCLE
+        pool_recycle=KInit.POSTGRES_POOL_RECYCLE,
+        # Test connections for liveness before checkout so the pool transparently
+        # replaces ones the server killed (e.g. idle_in_transaction_session_timeout
+        # or network EOF) instead of handing back a dead connection -> OperationalError.
+        pool_pre_ping=True,
+        # Tag connections so they're identifiable in pg_stat_activity.application_name.
+        connect_args={"application_name": "KigyoRobot"},
     )
 
 def start(max_retries=3, retry_delay=5):
